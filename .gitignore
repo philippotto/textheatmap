@@ -1,2 +1,5 @@
 *.sublime-workspace
 *.map
+!js/
+js/*
+!js/libs/

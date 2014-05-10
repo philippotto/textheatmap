@@ -2,10 +2,10 @@ require.config(
   baseUrl: 'js/libs'
 )
 
-require(["jquery", "d3.v3", "lodash"],  ->
+require(["jquery", "d3.v3", "lodash", "quill"], (jQuery, ignoreMe, lodash, Quill) ->
 
   getColor = d3.scale.category20c()
-  
+
   colors = ["#fff5f0","#fee0d2","#fcbba1","#fc9272","#fb6a4a","#ef3b2c","#cb181d","#a50f15","#67000d"]
 
   getColor = (i) ->
@@ -15,125 +15,93 @@ require(["jquery", "d3.v3", "lodash"],  ->
 
   class TextHeatMap
 
-    constructor: (@text) ->
-
-
     visualize: ->
-      
-      @cleanText = @clean(@text)
-      @analyzeText()
-      
-      @drawTextDIV()
+
+      @initializeQuill()
+      @analyzeQuillsText()
 
 
-    clean: (s) ->
+    initializeQuill: ->
 
-      
-      @originalWords = s.split(" ")
-      
-      words = (aWord.replace(/[^a-zA-Zäöüß ]/g, "").toLowerCase() for aWord in @originalWords)
-      return words
+      @editor = new Quill('#editor');
 
+      debouncedChangeHandler = _.debounce(@analyzeQuillsText.bind(@), 500)
 
-    cleanWord: (s) ->
-
-      return s.replace(/[^a-zA-Zäöüß ]/g, "").toLowerCase()
+      @editor.on('text-change', =>
+        unless @currentlyFormatting
+         debouncedChangeHandler()
+      )
 
 
-    analyzeText: ->
+    analyzeQuillsText: ->
 
-      words = {}
-
-      for word in @cleanText
-        
-        words[word] = words[word] + 1 or 1
-        # $("div").append("<span>#{word}</span> ")
-
-      maximum = _.max(words)
-
-      @words = words
-      @maximum = maximum
+      analysis = @analyzeText(@editor.getText())
+      @fillQuill(analysis)
 
 
-    drawTextSVG: ->
+    fillQuill: (analysis) ->
 
-      words = @words
-      originalWords = @originalWords
-      maximum = @maximum
+      @currentlyFormatting = true
+      console.time("formatting")
 
-      text = d3.select("body").append("svg")
-        .append("text")
-        .attr("x", 30)
-        .attr("y", 30)
-        .attr("word-spacing", 8)
+      useBatchFormatting = true
 
+      formattingParams = []
 
-      currentLine = text.append("tspan")
-      
-      lineCount = 1
+      for aWord in analysis.words
 
-      for aWord, index in originalWords
+        wordCount = analysis.wordCounts[aWord.string.toLowerCase()]
 
-        BBox = currentLine[0][0].getBBox()
-
-        if index % 20 == 0
-
-          currentLine = text.append("tspan")
-                            .attr("x", 100)
-                            .attr("dy", 25)
-          
-
-        currentLine.append("tspan")
-          .text( aWord )
-          .attr("font-family", "Lato")
-          .attr("dx", 10)
-          .style("fill", (w, c) =>
-            wordCount = words[aWord]
-            getColor(Math.round( wordCount / maximum * 9 - 1 ))
-          )
-          .on("mouseenter", ->
-            
-
-            d3.select(this).transition(100).attr("fill-opacity", 1.0)
-            # d3.select("text").selectAll("tspan").filter()
-            
-          )
-          .on("mouseleave", -> d3.select(this).transition(100).attr("fill-opacity", 0.8) )
-
-        
-
-    drawTextDIV: ->
-
-      $("body").append("<div id='HeatMapDiv' style='background: #ffffff; font-family: Lato, sans-serif; padding: 15px'></div>")
-
-      $heatMap = $("#HeatMapDiv")
-
-      for aWord, index in @originalWords
-
-        cleanedWord = @cleanWord(aWord)
-        wordCount = @words[cleanedWord]
-        colorIndex = Math.round( wordCount / @maximum * 9 - 1 )
+        colorIndex = Math.round(wordCount / analysis.maximum * colors.length - 1)
         colorString = getColor(colorIndex)
+        frequency = wordCount / analysis.maximum
 
-        span = $(document.createElement("span"))
-            .text(@originalWords[index] + " ")
-            .css("color", colorString)
-        
-        $heatMap.append(span)
+        params = [aWord.startIndex, aWord.endIndex, 'color': colorString]
+        if useBatchFormatting
+          formattingParams.push(params)
+        else
+          @editor.formatText.apply(@editor, params)
 
+      if useBatchFormatting and formattingParams.length
+        @editor.batchFormatText(formattingParams)
 
+      console.timeEnd("formatting")
 
-  #################
-
-
-
-  testStr = (
-    for i in [0..15]
-      """This is a test in order to test if the TextHeatMap works properly. The word test should be highlighted because it is often used (this as a test)."""
-  ).join(" ")
+      @currentlyFormatting = false
 
 
-  map = new TextHeatMap(testStr)
+    analyzeText: (textString) ->
+
+      console.time("analysis")
+      wordPattern = /[\w]+/g
+
+      analysis =
+        words : []
+        wordCounts : {}
+        maximum : 0
+
+      iterationCount = 0
+
+      while (match = wordPattern.exec(textString)) and iterationCount++ < 1000
+
+        currentWord = {
+          string : match[0]
+          startIndex : match.index
+          endIndex : match.index + match[0].length
+        }
+
+        wordAsLowerCase = currentWord.string.toLowerCase()
+        analysis.wordCounts[wordAsLowerCase] = analysis.wordCounts[wordAsLowerCase] + 1 or 1
+
+        analysis.words.push(currentWord)
+
+      analysis.maximum = _.max(analysis.wordCounts)
+      console.timeEnd("analysis")
+
+      return analysis
+
+
+  map = new TextHeatMap()
   map.visualize()
 
 )
